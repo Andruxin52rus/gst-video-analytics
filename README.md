@@ -1,4 +1,4 @@
-# GStreamer Video Analytics Plugin
+# GStreamer Video Analytics Plugin 
 
 ## Overview
 <div align="center"><img src="intro.gif" width=900/></div>
