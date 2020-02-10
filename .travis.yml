@@ -12,7 +12,7 @@ services:
 # Build API reference
 script:
   - docker pull alpine:3.10
-  - docker run -v $PWD:/home alpine:3.10 /bin/sh -c "cd /home/gst-libs/gst/videoanalytics; apk update && apk add doxygen; doxygen Doxyfile;"
+  - docker run -v $PWD:/home alpine:3.10 /bin/sh -c "cd /home/gst-libs/gst/videoanalytics && apk update && apk add doxygen && doxygen Doxyfile;"
 
 # Deploy API reference
 deploy:
