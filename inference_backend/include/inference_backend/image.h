@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -10,7 +10,12 @@
 
 namespace InferenceBackend {
 
-enum class MemoryType { ANY = 0, SYSTEM = 1, OPENCL = 2 };
+enum class MemoryType {
+    ANY = 0,
+    SYSTEM = 1,
+    DMA_BUFFER = 2,
+    VAAPI = 3,
+};
 
 enum FourCC {
     FOURCC_NV12 = 0x3231564E,
@@ -26,24 +31,38 @@ enum FourCC {
 };
 
 struct Rectangle {
-    int x;
-    int y;
-    int width;
-    int height;
+    uint32_t x;
+    uint32_t y;
+    uint32_t width;
+    uint32_t height;
 };
 
 struct Image {
     MemoryType type;
-    static const unsigned MAX_PLANES_NUMBER = 4;
+    static const uint32_t MAX_PLANES_NUMBER = 4;
     union {
         uint8_t *planes[MAX_PLANES_NUMBER]; // if type==SYSTEM
-        void *cl_mem;                       // if type==OPENCL
+        int dma_fd;                         // if type==DMA_BUFFER
+        struct {
+            uint32_t va_surface_id;
+            void *va_display;
+        };
     };
     int format; // FourCC
-    int width;
-    int height;
-    int stride[MAX_PLANES_NUMBER];
+    uint32_t width;
+    uint32_t height;
+    uint32_t stride[MAX_PLANES_NUMBER];
     Rectangle rect;
+};
+
+// Map DMA/VAAPI image into system memory
+class ImageMap {
+  public:
+    virtual Image Map(const Image &image) = 0;
+    virtual void Unmap() = 0;
+
+    static ImageMap *Create();
+    virtual ~ImageMap() = default;
 };
 
 } // namespace InferenceBackend

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -10,17 +10,17 @@
 #include <gst/gst.h>
 #include <gst/video/video.h>
 
-#include "converters.h"
-#include "gva_json_meta.h"
-
 #include "config.h"
+#include "converters.h"
+#include "gva_caps.h"
+#include "gva_json_meta.h"
 
 #define UNUSED(x) (void)(x)
 
 #define ELEMENT_LONG_NAME "Metadata converter"
 #define ELEMENT_DESCRIPTION "Metadata converter"
 
-GST_DEBUG_CATEGORY_STATIC(gst_gva_meta_convert_debug_category);
+GST_DEBUG_CATEGORY(gst_gva_meta_convert_debug_category);
 #define GST_CAT_DEFAULT gst_gva_meta_convert_debug_category
 /* prototypes */
 
@@ -46,47 +46,26 @@ enum {
 };
 static guint gst_interpret_signals[LAST_SIGNAL] = {0};
 
-#define DEFAULT_MODEL NULL
-#define DEFAULT_LAYER_NAME NULL
-#define DEFAULT_THRESHOLD 0.5
-#define DEFAULT_CONVERTER GST_GVA_METACONVERT_JSON
+#define DEFAULT_FORMAT GST_GVA_METACONVERT_JSON
 #define DEFAULT_SIGNAL_HANDOFFS FALSE
-#define DEFAULT_INFERENCE_ID NULL
-#define DEFAULT_METHOD GST_GVA_METACONVERT_ALL
+#define DEFAULT_ADD_TENSOR_DATA FALSE
 #define DEFAULT_SOURCE NULL
 #define DEFAULT_TAGS NULL
-#define DEFAULT_INCLUDE_NO_DETECTIONS FALSE
-#define DEFAULT_LOCATION "."
+#define DEFAULT_ADD_EMPTY_DETECTION_RESULTS FALSE
+#define DEFAULT_JSON_INDENT -1
+#define MIN_JSON_INDENT -1
+#define MAX_JSON_INDENT 10
 
 enum {
     PROP_0,
-    PROP_CONVERTER,
-    PROP_METHOD,
-    PROP_MODEL,
-    PROP_LAYER_NAME,
-    PROP_INFERENCE_ID,
+    PROP_FORMAT,
+    PROP_ADD_TENSOR_DATA,
     PROP_SIGNAL_HANDOFFS,
     PROP_SOURCE,
     PROP_TAGS,
-    PROP_INCLUDE_NO_DETECTIONS,
-    PROP_LOCATION
+    PROP_ADD_EMPTY_DETECTION_RESULTS,
+    PROP_JSON_INDENT
 };
-
-/* pad templates */
-
-#ifdef SUPPORT_DMA_BUFFER
-#define DMA_BUFFER_CAPS GST_VIDEO_CAPS_MAKE_WITH_FEATURES("memory:DMABuf", "{ I420 }") "; "
-#else
-#define DMA_BUFFER_CAPS
-#endif
-
-#define VA_SURFACE_CAPS
-
-#define SYSTEM_MEM_CAPS GST_VIDEO_CAPS_MAKE("{ BGRx, BGRA }")
-
-#define INFERENCE_CAPS DMA_BUFFER_CAPS VA_SURFACE_CAPS SYSTEM_MEM_CAPS
-#define VIDEO_SINK_CAPS INFERENCE_CAPS
-#define VIDEO_SRC_CAPS INFERENCE_CAPS
 
 /* class initialization */
 
@@ -94,50 +73,27 @@ G_DEFINE_TYPE_WITH_CODE(GstGvaMetaConvert, gst_gva_meta_convert, GST_TYPE_BASE_T
                         GST_DEBUG_CATEGORY_INIT(gst_gva_meta_convert_debug_category, "gvametaconvert", 0,
                                                 "debug category for gvametaconvert element"));
 
-GType gst_gva_metaconvert_get_converter(void) {
-    static GType gva_metaconvert_converter_type = 0;
-    static const GEnumValue converter_types[] = {
-        {GST_GVA_METACONVERT_TENSOR2TEXT, "Tensor to text conversion", "tensor2text"},
-        {GST_GVA_METACONVERT_JSON, "Conversion to json file", "json"},
-        {GST_GVA_METACONVERT_DUMP_DETECTION, "Dump detection", "dump-detection"},
-        {GST_GVA_METACONVERT_DUMP_CLASSIFICATION, "Dump classification", "dump-classification"},
-        {GST_GVA_METACONVERT_DUMP_TENSORS, "Dump tensors", "dump-tensors"},
-        {GST_GVA_METACONVERT_TENSORS_TO_FILE, "Tensors to file", "tensors-to-file"},
-        {GST_GVA_METACONVERT_ADD_FULL_FRAME_ROI, "Add fullframe ROI", "add-fullframe-roi"},
+GType gst_gva_metaconvert_get_format(void) {
+    static GType gva_metaconvert_format_type = 0;
+    static const GEnumValue format_types[] = {
+        {GST_GVA_METACONVERT_JSON, "Conversion to GstGVAJSONMeta", "json"},
+        {GST_GVA_METACONVERT_DUMP_DETECTION, "Dump detection to GST debug log", "dump-detection"},
         {0, NULL, NULL}};
 
-    if (!gva_metaconvert_converter_type) {
-        gva_metaconvert_converter_type = g_enum_register_static("GstGVAMetaconvertConverterType", converter_types);
+    if (!gva_metaconvert_format_type) {
+        gva_metaconvert_format_type = g_enum_register_static("GstGVAMetaconvertFormatType", format_types);
     }
-    return gva_metaconvert_converter_type;
+    return gva_metaconvert_format_type;
 }
 
-#define GST_TYPE_GVA_METACONVERT_METHOD (gst_gva_metaconvert_get_method())
-static GType gst_gva_metaconvert_get_method(void) {
-    static GType gva_metaconvert_method_type = 0;
-    static const GEnumValue method_types[] = {{GST_GVA_METACONVERT_ALL, "All conversion", "all"},
-                                              {GST_GVA_METACONVERT_DETECTION, "Detection conversion", "detection"},
-                                              {GST_GVA_METACONVERT_TENSOR, "Tensor conversion", "tensor"},
-                                              {GST_GVA_METACONVERT_MAX, "Max conversion", "max"},
-                                              {GST_GVA_METACONVERT_INDEX, "Index conversion", "index"},
-                                              {GST_GVA_METACONVERT_COMPOUND, "Compound conversion", "compound"},
-                                              {0, NULL, NULL}};
-
-    if (!gva_metaconvert_method_type) {
-        gva_metaconvert_method_type = g_enum_register_static("GstGVAMetaconvertMethodType", method_types);
-    }
-    return gva_metaconvert_method_type;
-}
-
-static void gst_gva_metaconvert_set_converter(GstGvaMetaConvert *gvametaconvert,
-                                              GstGVAMetaconvertConverterType converter_type) {
-    GST_DEBUG_OBJECT(gvametaconvert, "setting converter to %d", converter_type);
+static void gst_gva_metaconvert_set_format(GstGvaMetaConvert *gvametaconvert, GstGVAMetaconvertFormatType format_type) {
+    GST_DEBUG_OBJECT(gvametaconvert, "setting format to %d", format_type);
 
     GHashTable *converters = get_converters();
-    convert_function_type convert_function = g_hash_table_lookup(converters, GINT_TO_POINTER(converter_type));
+    convert_function_type convert_function = g_hash_table_lookup(converters, GINT_TO_POINTER(format_type));
 
     if (convert_function) {
-        gvametaconvert->converter = converter_type;
+        gvametaconvert->format = format_type;
         gvametaconvert->convert_function = convert_function;
     } else
         g_assert_not_reached();
@@ -154,10 +110,10 @@ static void gst_gva_meta_convert_class_init(GstGvaMetaConvertClass *klass) {
        base_class_init if you intend to subclass this class. */
     gst_element_class_add_pad_template(
         GST_ELEMENT_CLASS(klass),
-        gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, gst_caps_from_string(VIDEO_SRC_CAPS)));
+        gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, gst_caps_from_string(GVA_CAPS)));
     gst_element_class_add_pad_template(
         GST_ELEMENT_CLASS(klass),
-        gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS, gst_caps_from_string(VIDEO_SINK_CAPS)));
+        gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS, gst_caps_from_string(GVA_CAPS)));
 
     gst_element_class_set_static_metadata(GST_ELEMENT_CLASS(klass), ELEMENT_LONG_NAME, "Video", ELEMENT_DESCRIPTION,
                                           "Intel Corporation");
@@ -173,35 +129,20 @@ static void gst_gva_meta_convert_class_init(GstGvaMetaConvertClass *klass) {
     base_transform_class->transform_ip = GST_DEBUG_FUNCPTR(gst_gva_meta_convert_transform_ip);
     element_class->change_state = GST_DEBUG_FUNCPTR(gst_gva_meta_convert_change_state);
 
-    g_object_class_install_property(gobject_class, PROP_MODEL,
-                                    g_param_spec_string("model", "Model",
-                                                        "Select/filter tensor to be converted by model name",
-                                                        DEFAULT_MODEL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-        gobject_class, PROP_LAYER_NAME,
-        g_param_spec_string("layer-name", "Layer Name", "Select/filter tensor to be converted by output layer name",
-                            DEFAULT_LAYER_NAME, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(
-        gobject_class, PROP_INFERENCE_ID,
-        g_param_spec_string("inference-id", "Inference Id",
-                            "Select/filter tensor to be converted by GStreamer element name", DEFAULT_INFERENCE_ID,
-                            G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(gobject_class, PROP_CONVERTER,
-                                    g_param_spec_enum("converter", "Conversion group", "Conversion group",
-                                                      GST_TYPE_GVA_METACONVERT_CONVERTER, DEFAULT_CONVERTER,
+    g_object_class_install_property(gobject_class, PROP_FORMAT,
+                                    g_param_spec_enum("format", "Format",
+                                                      "Output format for conversion. Enum: (1) "
+                                                      "json GstGVAJSONMeta representing inference results. For "
+                                                      "details on the schema please see the user guide.",
+                                                      GST_TYPE_GVA_METACONVERT_FORMAT, DEFAULT_FORMAT,
                                                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
-    g_object_class_install_property(gobject_class, PROP_METHOD,
-                                    g_param_spec_enum("method", "Conversion method", "Conversion method",
-                                                      GST_TYPE_GVA_METACONVERT_METHOD, DEFAULT_METHOD,
-                                                      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
-
-    g_object_class_install_property(gobject_class, PROP_LOCATION,
-                                    g_param_spec_string("location", "Location for the output files", "Path to folder",
-                                                        DEFAULT_LOCATION, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+    g_object_class_install_property(gobject_class, PROP_ADD_TENSOR_DATA,
+                                    g_param_spec_boolean("add-tensor-data", "Add Tensor Data",
+                                                         "Add raw tensor data in "
+                                                         "addition to detection and classification labels.",
+                                                         DEFAULT_ADD_TENSOR_DATA,
+                                                         G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
         gobject_class, PROP_SIGNAL_HANDOFFS,
@@ -209,19 +150,31 @@ static void gst_gva_meta_convert_class_init(GstGvaMetaConvertClass *klass) {
                              DEFAULT_SIGNAL_HANDOFFS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(gobject_class, PROP_SOURCE,
-                                    g_param_spec_string("source", "Source URI", "Source URI", DEFAULT_SOURCE,
-                                                        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+                                    g_param_spec_string("source", "Source URI",
+                                                        "User supplied URI identifying the "
+                                                        "media source associated with the inference results",
+                                                        DEFAULT_SOURCE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(gobject_class, PROP_TAGS,
                                     g_param_spec_string("tags", "Custom tags",
-                                                        "JSON object of custom values added to json message",
+                                                        "User supplied JSON object of additional properties added to "
+                                                        "each frame's inference results",
                                                         DEFAULT_TAGS, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
-    g_object_class_install_property(gobject_class, PROP_INCLUDE_NO_DETECTIONS,
-                                    g_param_spec_boolean("include-no-detections", "include metas with no detections",
-                                                         "Convert a JSON message with no detections",
-                                                         DEFAULT_INCLUDE_NO_DETECTIONS,
+    g_object_class_install_property(gobject_class, PROP_ADD_EMPTY_DETECTION_RESULTS,
+                                    g_param_spec_boolean("add-empty-results", "include metas with no detections",
+                                                         "Add metadata when inference is run but no "
+                                                         "results meet the detection threshold",
+                                                         DEFAULT_ADD_EMPTY_DETECTION_RESULTS,
                                                          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+    g_object_class_install_property(
+        gobject_class, PROP_JSON_INDENT,
+        g_param_spec_int(
+            "json-indent", "JSON indent",
+            "To control format of metadata output, indicate the number of spaces to indent blocks of JSON (-1 to 10).",
+            MIN_JSON_INDENT, MAX_JSON_INDENT, DEFAULT_JSON_INDENT,
+            (GParamFlags)(G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
     gst_interpret_signals[SIGNAL_HANDOFF] = g_signal_new(
         "handoff", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET(GstGvaMetaConvertClass, handoff), NULL,
@@ -234,11 +187,14 @@ static void gst_gva_meta_convert_cleanup(GstGvaMetaConvert *gvametaconvert) {
 
     GST_DEBUG_OBJECT(gvametaconvert, "gst_gva_meta_convert_cleanup");
 
-    g_free(gvametaconvert->inference_id);
-    g_free(gvametaconvert->layer_name);
     g_free(gvametaconvert->source);
+    gvametaconvert->source = NULL;
     g_free(gvametaconvert->tags);
-    g_free(gvametaconvert->location);
+    gvametaconvert->tags = NULL;
+    if (gvametaconvert->info) {
+        gst_video_info_free(gvametaconvert->info);
+        gvametaconvert->info = NULL;
+    }
 }
 
 static void gst_gva_meta_convert_reset(GstGvaMetaConvert *gvametaconvert) {
@@ -249,17 +205,14 @@ static void gst_gva_meta_convert_reset(GstGvaMetaConvert *gvametaconvert) {
 
     gst_gva_meta_convert_cleanup(gvametaconvert);
 
-    gvametaconvert->model = g_strdup(DEFAULT_MODEL);
-    gvametaconvert->layer_name = g_strdup(DEFAULT_LAYER_NAME);
-    gvametaconvert->inference_id = g_strdup(DEFAULT_INFERENCE_ID);
-    gvametaconvert->method = DEFAULT_METHOD;
+    gvametaconvert->add_tensor_data = DEFAULT_ADD_TENSOR_DATA;
     gvametaconvert->source = g_strdup(DEFAULT_SOURCE);
     gvametaconvert->tags = g_strdup(DEFAULT_TAGS);
-    gvametaconvert->include_no_detections = DEFAULT_INCLUDE_NO_DETECTIONS;
+    gvametaconvert->add_empty_detection_results = DEFAULT_ADD_EMPTY_DETECTION_RESULTS;
     gvametaconvert->signal_handoffs = DEFAULT_SIGNAL_HANDOFFS;
-    gvametaconvert->threshold = DEFAULT_THRESHOLD;
-    gst_gva_metaconvert_set_converter(gvametaconvert, DEFAULT_CONVERTER);
-    gvametaconvert->location = g_strdup(DEFAULT_LOCATION);
+    gst_gva_metaconvert_set_format(gvametaconvert, DEFAULT_FORMAT);
+    gvametaconvert->info = NULL;
+    gvametaconvert->json_indent = DEFAULT_JSON_INDENT;
 }
 
 static GstStateChangeReturn gst_gva_meta_convert_change_state(GstElement *element, GstStateChange transition) {
@@ -293,36 +246,30 @@ void gst_gva_meta_convert_set_property(GObject *object, guint property_id, const
     GST_DEBUG_OBJECT(gvametaconvert, "set_property");
 
     switch (property_id) {
-    case PROP_MODEL:
-        gvametaconvert->model = g_value_dup_string(value);
+    case PROP_FORMAT:
+        gst_gva_metaconvert_set_format(gvametaconvert, g_value_get_enum(value));
         break;
-    case PROP_LAYER_NAME:
-        gvametaconvert->layer_name = g_value_dup_string(value);
-        break;
-    case PROP_INFERENCE_ID:
-        gvametaconvert->inference_id = g_value_dup_string(value);
-        break;
-    case PROP_CONVERTER:
-        gst_gva_metaconvert_set_converter(gvametaconvert, g_value_get_enum(value));
-        break;
-    case PROP_METHOD:
-        gvametaconvert->method = g_value_get_enum(value);
+    case PROP_ADD_TENSOR_DATA:
+        gvametaconvert->add_tensor_data = g_value_get_boolean(value);
         break;
     case PROP_SOURCE:
+        g_free(gvametaconvert->source);
         gvametaconvert->source = g_value_dup_string(value);
         break;
     case PROP_TAGS:
+        g_free(gvametaconvert->tags);
         gvametaconvert->tags = g_value_dup_string(value);
         break;
-    case PROP_INCLUDE_NO_DETECTIONS:
-        gvametaconvert->include_no_detections = g_value_get_boolean(value);
+    case PROP_ADD_EMPTY_DETECTION_RESULTS:
+        gvametaconvert->add_empty_detection_results = g_value_get_boolean(value);
         break;
     case PROP_SIGNAL_HANDOFFS:
         gvametaconvert->signal_handoffs = g_value_get_boolean(value);
         break;
-    case PROP_LOCATION:
-        gvametaconvert->location = g_value_dup_string(value);
+    case PROP_JSON_INDENT:
+        gvametaconvert->json_indent = g_value_get_int(value);
         break;
+
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
         break;
@@ -335,20 +282,11 @@ void gst_gva_meta_convert_get_property(GObject *object, guint property_id, GValu
     GST_DEBUG_OBJECT(gvametaconvert, "get_property");
 
     switch (property_id) {
-    case PROP_INFERENCE_ID:
-        g_value_set_string(value, gvametaconvert->inference_id);
+    case PROP_FORMAT:
+        g_value_set_enum(value, gvametaconvert->format);
         break;
-    case PROP_MODEL:
-        g_value_set_string(value, gvametaconvert->model);
-        break;
-    case PROP_LAYER_NAME:
-        g_value_set_string(value, gvametaconvert->layer_name);
-        break;
-    case PROP_CONVERTER:
-        g_value_set_enum(value, gvametaconvert->converter);
-        break;
-    case PROP_METHOD:
-        g_value_set_enum(value, gvametaconvert->method);
+    case PROP_ADD_TENSOR_DATA:
+        g_value_set_boolean(value, gvametaconvert->add_tensor_data);
         break;
     case PROP_SOURCE:
         g_value_set_string(value, gvametaconvert->source);
@@ -356,15 +294,16 @@ void gst_gva_meta_convert_get_property(GObject *object, guint property_id, GValu
     case PROP_TAGS:
         g_value_set_string(value, gvametaconvert->tags);
         break;
-    case PROP_INCLUDE_NO_DETECTIONS:
-        g_value_set_boolean(value, gvametaconvert->include_no_detections);
+    case PROP_ADD_EMPTY_DETECTION_RESULTS:
+        g_value_set_boolean(value, gvametaconvert->add_empty_detection_results);
         break;
     case PROP_SIGNAL_HANDOFFS:
         g_value_set_boolean(value, gvametaconvert->signal_handoffs);
         break;
-    case PROP_LOCATION:
-        g_value_set_string(value, gvametaconvert->location);
+    case PROP_JSON_INDENT:
+        g_value_set_int(value, gvametaconvert->json_indent);
         break;
+
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
         break;
@@ -398,7 +337,9 @@ static gboolean gst_gva_meta_convert_set_caps(GstBaseTransform *trans, GstCaps *
 
     GstGvaMetaConvert *gvametaconvert = GST_GVA_META_CONVERT(trans);
     GST_DEBUG_OBJECT(gvametaconvert, "set_caps");
-    gvametaconvert->info = gst_video_info_new();
+    if (!gvametaconvert->info) {
+        gvametaconvert->info = gst_video_info_new();
+    }
     gst_video_info_from_caps(gvametaconvert->info, incaps);
     return TRUE;
 }
@@ -431,10 +372,12 @@ static gboolean gst_gva_meta_convert_sink_event(GstBaseTransform *trans, GstEven
 
 static GstFlowReturn gst_gva_meta_convert_transform_ip(GstBaseTransform *trans, GstBuffer *buf) {
     GstGvaMetaConvert *gvametaconvert = GST_GVA_META_CONVERT(trans);
+
     if (gvametaconvert->signal_handoffs) {
         g_signal_emit(gvametaconvert, gst_interpret_signals[SIGNAL_HANDOFF], 0, buf);
     } else if (gvametaconvert->convert_function) {
         gvametaconvert->convert_function(gvametaconvert, buf);
     }
+
     return GST_FLOW_OK;
 }

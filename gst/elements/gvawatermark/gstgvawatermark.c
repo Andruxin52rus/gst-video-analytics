@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -9,8 +9,7 @@
 #include <gst/base/gstbasetransform.h>
 #include <gst/gst.h>
 
-#include "fps_meter.h"
-#include "gva_roi_meta.h"
+#include "gva_caps.h"
 #include "watermark.h"
 
 #include "config.h"
@@ -35,22 +34,6 @@ static gboolean gst_gva_watermark_stop(GstBaseTransform *trans);
 static gboolean gst_gva_watermark_set_caps(GstBaseTransform *trans, GstCaps *incaps, GstCaps *outcaps);
 static GstFlowReturn gst_gva_watermark_transform_ip(GstBaseTransform *trans, GstBuffer *buf);
 
-enum { PROP_0 };
-
-#ifdef SUPPORT_DMA_BUFFER
-#define DMA_BUFFER_CAPS GST_VIDEO_CAPS_MAKE_WITH_FEATURES("memory:DMABuf", "{ I420 }") "; "
-#else
-#define DMA_BUFFER_CAPS
-#endif
-
-#define VA_SURFACE_CAPS
-
-#define SYSTEM_MEM_CAPS GST_VIDEO_CAPS_MAKE("{ BGRx, BGRA }")
-
-#define WATERMARK_CAPS DMA_BUFFER_CAPS VA_SURFACE_CAPS SYSTEM_MEM_CAPS
-#define VIDEO_SINK_CAPS WATERMARK_CAPS
-#define VIDEO_SRC_CAPS WATERMARK_CAPS
-
 /* class initialization */
 
 G_DEFINE_TYPE_WITH_CODE(GstGvaWatermark, gst_gva_watermark, GST_TYPE_BASE_TRANSFORM,
@@ -65,9 +48,9 @@ static void gst_gva_watermark_class_init(GstGvaWatermarkClass *klass) {
     /* Setting up pads and setting metadata should be moved to
        base_class_init if you intend to subclass this class. */
     gst_element_class_add_pad_template(
-        element_class, gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, gst_caps_from_string(VIDEO_SRC_CAPS)));
-    gst_element_class_add_pad_template(element_class, gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-                                                                           gst_caps_from_string(VIDEO_SINK_CAPS)));
+        element_class, gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, gst_caps_from_string(GVA_CAPS)));
+    gst_element_class_add_pad_template(
+        element_class, gst_pad_template_new("sink", GST_PAD_SINK, GST_PAD_ALWAYS, gst_caps_from_string(GVA_CAPS)));
 
     gst_element_class_set_static_metadata(element_class, ELEMENT_LONG_NAME, "Video", ELEMENT_DESCRIPTION,
                                           "Intel Corporation");
@@ -138,7 +121,6 @@ static gboolean gst_gva_watermark_start(GstBaseTransform *trans) {
     GstGvaWatermark *gvawatermark = GST_GVA_WATERMARK(trans);
 
     GST_DEBUG_OBJECT(gvawatermark, "start");
-    fps_meter_init(&gvawatermark->fps_meter);
     return TRUE;
 }
 
@@ -167,14 +149,12 @@ static GstFlowReturn gst_gva_watermark_transform_ip(GstBaseTransform *trans, Gst
 
     GST_DEBUG_OBJECT(gvawatermark, "transform_ip");
 
-    if (fps_meter_new_frame(&gvawatermark->fps_meter, 1000)) {
-        GST_INFO_OBJECT(gvawatermark, "fps %.2f", gvawatermark->fps_meter.fps);
-    }
     if (!gst_pad_is_linked(GST_BASE_TRANSFORM_SRC_PAD(trans))) {
         return GST_BASE_TRANSFORM_FLOW_DROPPED;
     }
 
-    draw_label(buf, &gvawatermark->info);
+    if (!draw_label(gvawatermark, buf))
+        return GST_FLOW_ERROR;
 
     return GST_FLOW_OK;
 }

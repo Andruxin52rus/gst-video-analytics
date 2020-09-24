@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -10,11 +10,15 @@
 
 #include "gstgvaclassify.h"
 #include "gstgvadetect.h"
-#include "gstgvaidentify.h"
+#include "gstgvafpscounter.h"
 #include "gstgvainference.h"
 #include "gstgvametaconvert.h"
 #include "gstgvametapublish.h"
+#include "gstgvatrack.h"
 #include "gstgvawatermark.h"
+
+#include "gva_json_meta.h"
+#include "gva_tensor_meta.h"
 
 static gboolean plugin_init(GstPlugin *plugin) {
     if (!gst_element_register(plugin, "gvainference", GST_RANK_NONE, GST_TYPE_GVA_INFERENCE))
@@ -26,17 +30,26 @@ static gboolean plugin_init(GstPlugin *plugin) {
     if (!gst_element_register(plugin, "gvaclassify", GST_RANK_NONE, GST_TYPE_GVA_CLASSIFY))
         return FALSE;
 
-    if (!gst_element_register(plugin, "gvaidentify", GST_RANK_NONE, GST_TYPE_GVA_IDENTIFY))
-        return FALSE;
-
     if (!gst_element_register(plugin, "gvametaconvert", GST_RANK_NONE, GST_TYPE_GVA_META_CONVERT))
         return FALSE;
 
     if (!gst_element_register(plugin, "gvawatermark", GST_RANK_NONE, GST_TYPE_GVA_WATERMARK))
         return FALSE;
 
+    if (!gst_element_register(plugin, "gvafpscounter", GST_RANK_NONE, GST_TYPE_GVA_FPSCOUNTER))
+        return FALSE;
+
     if (!gst_element_register(plugin, "gvametapublish", GST_RANK_NONE, GST_TYPE_GVA_META_PUBLISH))
         return FALSE;
+
+    if (!gst_element_register(plugin, "gvatrack", GST_RANK_NONE, GST_TYPE_GVA_TRACK))
+        return FALSE;
+
+    // register metadata
+    gst_gva_json_meta_get_info();
+    gst_gva_json_meta_api_get_type();
+    gst_gva_tensor_meta_get_info();
+    gst_gva_tensor_meta_api_get_type();
 
     return TRUE;
 }

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Copyright (C) 2018-2019 Intel Corporation
+# Copyright (C) 2018-2020 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -59,5 +59,5 @@ docker run -it --privileged --net=host \
     -v $VIDEO_EXAMPLES_PATH:/root/video-examples \
     -e VIDEO_EXAMPLES_DIR=/root/video-examples \
     \
-    -w /root/gstreamer-plugins/samples \
+    -w /root/gst-video-analytics/samples \
     $IMAGE_NAME

@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (C) 2018-2019 Intel Corporation
+# Copyright (C) 2018-2020 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -8,9 +8,6 @@ cmake_minimum_required(VERSION 3.1)
 
 add_subdirectory(opencv_utils)
 add_subdirectory(opencv)
-if(${HAVE_GAPI})
-    add_subdirectory(gapi)
-endif()
 
 set (TARGET_NAME "pre_proc")
 

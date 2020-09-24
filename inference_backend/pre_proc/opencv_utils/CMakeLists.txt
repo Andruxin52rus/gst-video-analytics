@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (C) 2018-2019 Intel Corporation
+# Copyright (C) 2018-2020 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -42,5 +42,3 @@ PUBLIC
 PRIVATE
         ${OpenCV_LIBS}
 )
-
-install(TARGETS ${TARGET_NAME} DESTINATION lib/va-gstreamer-plugins)

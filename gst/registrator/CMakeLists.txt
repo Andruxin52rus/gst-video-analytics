@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (C) 2018-2019 Intel Corporation
+# Copyright (C) 2018-2020 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -33,9 +33,9 @@ PRIVATE
 target_link_libraries(${TARGET_NAME}
 PRIVATE
     ${GSTREAMER_LIBRARIES}
-    base
+    common
     elements
     inference_elements
 )
 
-install(TARGETS ${TARGET_NAME} DESTINATION lib/va-gstreamer-plugins)
+install(TARGETS ${TARGET_NAME} DESTINATION ${DLSTREAMER_PLUGINS_INSTALL_PATH})

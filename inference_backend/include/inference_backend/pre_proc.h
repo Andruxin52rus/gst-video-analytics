@@ -1,20 +1,23 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
 
 #pragma once
-
 #include "image.h"
 
 namespace InferenceBackend {
 
+enum class PreProcessType {
+    Invalid,
+    OpenCV,
+    VAAPI,
+};
+
 class PreProc {
   public:
-    MemoryType Type;
-
-    static PreProc *Create(MemoryType type);
+    static PreProc *Create(PreProcessType type);
 
     virtual ~PreProc() {
     }
@@ -24,7 +27,7 @@ class PreProc {
 };
 
 int GetPlanesCount(int fourcc);
+Image ApplyCrop(const Image &src);
 
-PreProc *CreatePreProcGAPI();
 PreProc *CreatePreProcOpenCV();
 } // namespace InferenceBackend

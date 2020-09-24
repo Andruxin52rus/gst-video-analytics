@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (C) 2018-2019 Intel Corporation
+# Copyright (C) 2018-2020 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -11,6 +11,7 @@ set (TARGET_NAME "common")
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GSTREAMER gstreamer-1.0>=1.14 REQUIRED)
 pkg_check_modules(GSTVIDEO gstreamer-video-1.0>=1.14 REQUIRED)
+pkg_check_modules(GSTALLOC gstreamer-allocators-1.0 REQUIRED)
 pkg_check_modules(GLIB2 glib-2.0 REQUIRED)
 
 
@@ -31,7 +32,9 @@ PUBLIC
         ${GSTVIDEO_INCLUDE_DIRS}
         ${GLIB2_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}
-)
+PRIVATE
+        ${GSTALLOC_INCLUDE_DIRS}
+        )
 
 target_link_libraries(${TARGET_NAME}
 PUBLIC
@@ -40,7 +43,10 @@ PUBLIC
         ${GLIB2_LIBRARIES}
         logger
         gstvideoanalyticsmeta
-        jsonconvert
+        json-hpp
+PRIVATE
+        ${GSTALLOC_LIBRARIES}
 )
-
-install(TARGETS ${TARGET_NAME} DESTINATION lib/va-gstreamer-plugins)
+if (${USE_VPUSMM})
+        target_link_libraries(${TARGET_NAME} PUBLIC vpusmm)
+endif()

@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018-2019 Intel Corporation
+ * Copyright (C) 2018-2020 Intel Corporation
  *
  * SPDX-License-Identifier: MIT
  ******************************************************************************/
@@ -7,31 +7,36 @@
 #pragma once
 
 #include "inference_backend/image_inference.h"
+#include "inference_backend/logger.h"
 #include "inference_backend/pre_proc.h"
 
+#include <atomic>
 #include <inference_engine.hpp>
 #include <map>
 #include <string>
 #include <thread>
 
 #include "config.h"
-
-#include "inference_backend/logger.h"
 #include "safe_queue.h"
 
-using namespace InferenceBackend;
-
-class OpenVINOImageInference : public ImageInference {
+class OpenVINOImageInference : public InferenceBackend::ImageInference {
   public:
-    OpenVINOImageInference(std::string devices, std::string model, int batch_size, int nireq,
-                           const std::map<std::string, std::string> &config, Allocator *allocator,
-                           CallbackFunc callback);
+    OpenVINOImageInference(const std::string &model,
+                           const std::map<std::string, std::map<std::string, std::string>> &config,
+                           InferenceBackend::Allocator *allocator, CallbackFunc callback,
+                           ErrorHandlingFunc error_handler);
+
+    void CreateInferRequests();
 
     virtual ~OpenVINOImageInference();
 
-    virtual void SubmitImage(const Image &image, IFramePtr user_data, std::function<void(Image &)> preProcessor);
+    virtual void
+    SubmitImage(const InferenceBackend::Image &image, IFramePtr user_data,
+                const std::map<std::string, InferenceBackend::InputLayerDesc::Ptr> &input_preprocessors) override;
 
     virtual const std::string &GetModelName() const;
+
+    virtual void GetModelImageInputInfo(size_t &width, size_t &height, size_t &batch_size, int &format) const;
 
     virtual bool IsQueueFull();
 
@@ -40,38 +45,52 @@ class OpenVINOImageInference : public ImageInference {
     virtual void Close();
 
   protected:
+    bool initialized;
+
     struct BatchRequest {
         InferenceEngine::InferRequest::Ptr infer_request;
         std::vector<IFramePtr> buffers;
         std::vector<InferenceBackend::Allocator::AllocContext *> alloc_context;
     };
 
-    void GetNextImageBuffer(std::shared_ptr<BatchRequest> request, Image *image);
+    // InferenceBackend::Image GetNextImageBuffer(std::shared_ptr<BatchRequest> request);
+    void HandleError(const std::shared_ptr<BatchRequest> &request);
+    void WorkingFunction(const std::shared_ptr<BatchRequest> &request);
 
-    void WorkingFunction();
-
-    bool resize_by_inference;
-    Allocator *allocator;
+    InferenceBackend::Allocator *allocator;
     CallbackFunc callback;
+    ErrorHandlingFunc handleError;
 
     // Inference Engine
-    std::vector<InferenceEngine::InferencePlugin::Ptr> plugins;
+    InferenceEngine::Core core;
     InferenceEngine::ConstInputsDataMap inputs;
     InferenceEngine::ConstOutputsDataMap outputs;
-    std::string modelName;
+    std::string model_name;
+    std::string image_layer;
 
     // Threading
-    int batch_size;
-    std::thread working_thread;
+    const int batch_size;
     SafeQueue<std::shared_ptr<BatchRequest>> freeRequests;
-    SafeQueue<std::shared_ptr<BatchRequest>> workingRequests;
 
-    // VPP
-    std::unique_ptr<PreProc> sw_vpp;
-    bool already_flushed;
+    std::unique_ptr<InferenceBackend::PreProc> pre_processor;
+
+    std::mutex mutex_;
+    std::atomic<unsigned int> requests_processing_;
+    std::condition_variable request_processed_;
     std::mutex flush_mutex;
 
+    std::queue<InferenceBackend::OutputBlob> output_blob_pool;
+
   private:
-    void SubmitImageSoftwarePreProcess(std::shared_ptr<BatchRequest> request, const Image *pSrc,
-                                       std::function<void(Image &)> preProcessor);
+    void SubmitImageProcessing(const std::string &input_name, std::shared_ptr<BatchRequest> request,
+                               const InferenceBackend::Image &src_img);
+    void BypassImageProcessing(const std::string &input_name, std::shared_ptr<BatchRequest> request,
+                               const InferenceBackend::Image &src_img);
+    void setCompletionCallback(std::shared_ptr<BatchRequest> &batch_request);
+    void
+    ApplyInputPreprocessors(std::shared_ptr<BatchRequest> &request,
+                            const std::map<std::string, InferenceBackend::InputLayerDesc::Ptr> &input_preprocessors);
+    void setBlobsToInferenceRequest(const std::map<std::string, InferenceEngine::TensorDesc> &layers,
+                                    std::shared_ptr<BatchRequest> &batch_request,
+                                    InferenceBackend::Allocator *allocator);
 };

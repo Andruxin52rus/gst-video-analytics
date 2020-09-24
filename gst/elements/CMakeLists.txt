@@ -1,5 +1,5 @@
 # ==============================================================================
-# Copyright (C) 2018-2019 Intel Corporation
+# Copyright (C) 2018-2020 Intel Corporation
 #
 # SPDX-License-Identifier: MIT
 # ==============================================================================
@@ -15,14 +15,17 @@ pkg_check_modules(GSTVIDEO gstreamer-video-1.0>=1.14 REQUIRED)
 pkg_check_modules(GSTALLOC gstreamer-allocators-1.0 REQUIRED)
 
 file (GLOB MAIN_SRC
-    gvaidentify/*.cpp
-    gvaidentify/*.c
     gvametaconvert/*.cpp
     gvametaconvert/*.c
     gvametapublish/*.cpp
     gvametapublish/*.c
     gvawatermark/*.cpp
     gvawatermark/*.c
+    gvafpscounter/*.cpp
+    gvafpscounter/*.c
+    gvatrack/*.cpp
+    gvatrack/*.c
+    gvatrack/iou/*.cpp
 )
 
 file (GLOB MAIN_HEADERS
@@ -30,7 +33,21 @@ file (GLOB MAIN_HEADERS
     gvametaconvert/*.h
     gvametapublish/*.h
     gvawatermark/*.h
+    gvafpscounter/*.h
+    gvatrack/*.h
+    gvatrack/iou/*.h
 )
+
+if(${ENABLE_VAS_TRACKER})
+    file (GLOB VAS_SRC
+        gvatrack/vas/*.cpp
+    )
+    file (GLOB VAS_HEADERS
+        gvatrack/vas/*.h
+    )
+    list (APPEND MAIN_SRC ${VAS_SRC})
+    list (APPEND MAIN_HEADERS ${VAS_HEADERS})
+endif()
 
 add_library(${TARGET_NAME} STATIC ${MAIN_SRC} ${MAIN_HEADERS})
 set_compile_flags(${TARGET_NAME})
@@ -42,11 +59,26 @@ PUBLIC
     gvametaconvert
     gvametapublish
     gvawatermark
+    gvafpscounter
+    gvatrack
+    gvatrack/iou
 PRIVATE
     ${GSTREAMER_INCLUDE_DIRS}
     ${GSTVIDEO_INCLUDE_DIRS}
     ${GSTALLOC_INCLUDE_DIRS}
 )
+
+if(${ENABLE_VAS_TRACKER})
+    target_include_directories(${TARGET_NAME}
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/gvatrack/vas
+    )
+
+    target_link_libraries(${TARGET_NAME}
+    PRIVATE
+        vas
+    )
+endif()
 
 target_link_libraries(${TARGET_NAME}
 PRIVATE
@@ -55,12 +87,17 @@ PRIVATE
     ${GSTVIDEO_LIBRARIES}
     ${GSTALLOC_LIBRARIES}
     common
+    image_inference
     image_inference_openvino
-    pre_proc
-    opencv_pre_proc
     logger
-    jsonconvert
+    json-hpp
+    json-schema-validator
+    utils
 )
+
+if(${HAVE_VAAPI})
+        target_link_libraries(${TARGET_NAME} PRIVATE image_inference_async)
+endif()
 
 target_include_directories(${TARGET_NAME}
 PRIVATE
@@ -68,18 +105,22 @@ PRIVATE
 )
 if (MQTT)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DPAHO_INC ")
-        target_link_libraries(${TARGET_NAME} PRIVATE paho-mqtt3c)
+        target_link_libraries(${TARGET_NAME} PRIVATE paho-mqtt3c uuid)
+        target_compile_definitions(${TARGET_NAME} PRIVATE META_PUBLISH_MQTT=1)
+        message("MQTT support will be available in metapublish element")
 else()
-        message("MQTT support will not be available due to required libraries (Paho MQTT) not being installed, please rebuild plugin before attempting to use MQTT")
+        target_compile_definitions(${TARGET_NAME} PRIVATE META_PUBLISH_MQTT=0)
+        message("MQTT support will not be available. Ensure required libraries (Paho MQTT) are installed, and rebuild plugin with -DMQTT=1 before attempting to use MQTT")
 endif()
 
 if (KAFKA)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DKAFKA_INC ")
         target_link_libraries(${TARGET_NAME} PRIVATE rdkafka)
+        target_compile_definitions(${TARGET_NAME} PRIVATE META_PUBLISH_KAFKA=1)
+        message("Kafka support will be available in metapublish element")
 else()
-        message("Kafka support will not be available due to required libraries (librdkafka) not being installed, please rebuild plugin before attempting to use Kafka")
+        target_compile_definitions(${TARGET_NAME} PRIVATE META_PUBLISH_KAFKA=0)
+        message("Kafka support will not be available. Ensure required libraries (librdkafka) are installed, and rebuild plugin with -DKAFKA=1 before attempting to use Kafka")
 endif()
 
-if(${HAVE_GAPI})
-    target_link_libraries(${TARGET_NAME} PRIVATE gapi_pre_proc)
-endif()
+add_subdirectory(gvapython)
